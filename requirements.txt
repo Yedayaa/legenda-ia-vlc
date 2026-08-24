@@ -1,0 +1,7 @@
+openai-whisper>=20240930
+transformers>=4.47,<5
+sentencepiece>=0.2
+sacremoses>=0.1
+imageio-ffmpeg>=0.6
+numpy>=1.26,<3
+safetensors>=0.4

@@ -1,0 +1,79 @@
+LEGENDA IA PARA VLC
+===================
+
+O que ele faz
+-------------
+1. Você escolhe um filme ou episódio com áudio em inglês.
+2. O programa procura automaticamente a faixa de áudio marcada como inglês.
+3. O Whisper identifica as falas e os tempos de cada palavra.
+4. Uma segunda IA traduz as falas para português do Brasil.
+5. O programa cria um arquivo .pt-BR.srt ao lado do vídeo.
+6. O vídeo é aberto no VLC com a legenda carregada.
+
+
+COMO INSTALAR NO WINDOWS
+------------------------
+1. Tenha o VLC Media Player instalado.
+2. Instale o Python 3.12.10 de 64 bits pelo site python.org.
+   Durante a instalação, marque "Add python.exe to PATH".
+   Link: https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
+3. Dê dois cliques em instalar.bat e aguarde.
+4. Depois, dê dois cliques em iniciar.bat.
+
+Se aparecer um erro, use iniciar-diagnostico.bat. Ele mantém a janela preta
+aberta e mostra informações que ajudam a identificar o problema.
+
+
+COMO USAR
+---------
+1. Clique em Selecionar.
+2. Escolha o filme ou episódio.
+3. Deixe "Recomendado — medium.en" selecionado.
+4. Clique em "Gerar legenda e abrir no VLC".
+5. Aguarde. Na primeira vez, os modelos de IA serão baixados.
+
+
+QUALIDADE E VELOCIDADE
+---------------------
+- Recomendado — medium.en: boa precisão e cerca de 5 GB de VRAM.
+- Menor uso de memória — small.en: cerca de 2 GB de VRAM.
+- Mais qualidade — turbo: cerca de 6 GB de VRAM; pode ser usado na GTX 1070.
+- O áudio é processado em blocos de 5 minutos para reduzir o uso da RAM e
+  permitir cancelamento mais rápido.
+- Os blocos têm sobreposição protegida para não cortar falas na divisão.
+- Se faltar memória na GPU, o programa muda sozinho para o modo small.en.
+- Se faltar memória durante a tradução, ela continua automaticamente pela CPU.
+- A tradução usa explicitamente a variante brasileira do modelo (PT-BR).
+- A barra mostra a etapa atual e uma porcentagem aproximada do processamento.
+- "Usar somente CPU" existe para emergência, mas fica muito mais lento.
+- A legenda só substitui a versão anterior depois de ser gravada por completo.
+- Sem GPU compatível o programa funciona, mas um filme pode demorar bastante.
+
+
+EM QUAL COMPUTADOR RODA
+-----------------------
+- Suporte oficial: Windows 10 ou 11 de 64 bits.
+- Mínimo: processador x64 com 4 núcleos, 8 GB de RAM e 15 GB livres.
+  Use small.en e somente CPU; um filme de 1 hora pode levar várias horas.
+- Recomendado: processador com 4 núcleos/8 threads, 16 GB de RAM e GPU NVIDIA
+  com 6 a 8 GB de VRAM. Use medium.en.
+- Testado: i7-7700K, GTX 1070 8 GB e 16 GB de RAM.
+- Alto desempenho: 6 núcleos/12 threads, 32 GB de RAM e NVIDIA com 8 GB ou mais.
+- GPU AMD, Intel integrada ou ausência de NVIDIA: funciona somente pela CPU.
+- GPU NVIDIA com 4 GB: use small.en e feche outros programas.
+- Python 3.14, Windows 32 bits e Python 32 bits não são suportados nesta versão.
+- SSD é recomendado. Feche navegador e jogos se o computador tiver pouca RAM.
+
+
+ARQUIVOS E PRIVACIDADE
+----------------------
+- O vídeo não é enviado para a internet.
+- A internet é usada inicialmente para baixar os modelos de IA.
+- A legenda fica ao lado do vídeo com o final .pt-BR.srt.
+- Exemplo: Filme.mkv gera Filme.pt-BR.srt.
+
+
+OBSERVAÇÃO
+----------
+Este é um aplicativo auxiliar do VLC. Essa forma entrega mais qualidade e
+estabilidade do que tentar acessar o áudio por uma extensão interna do VLC.
