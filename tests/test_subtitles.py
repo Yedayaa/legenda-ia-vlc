@@ -18,19 +18,15 @@ from app import (
     CHUNK_SECONDS,
     Caption,
     brazilianize,
-    build_tv_video_command,
     captions_from_segment,
     choose_audio_stream_from_ffmpeg_output,
     create_overlapped_wav,
     format_timestamp,
     is_memory_error,
-    parse_media_duration,
-    parse_progress_time,
     prepare_translation_inputs,
     render_srt,
     source_units_from_whisper_segment,
     translate_to_portuguese,
-    tv_video_output_path,
     units_inside_chunk_window,
     wav_duration_seconds,
     write_srt_atomic,
@@ -170,9 +166,8 @@ class SubtitleTests(unittest.TestCase):
         self.assertIn('("Vídeos",', source)
         self.assertIn("AutoTokenizer.from_pretrained", source)
         self.assertNotIn("AutoTokenizer.frompretrained", source)
-        self.assertIn('APP_VERSION = "1.5.0"', source)
+        self.assertIn('APP_VERSION = "1.4.0"', source)
         self.assertIn('mode="determinate"', source)
-        self.assertIn("Criar vídeo legendado para TV", source)
         self.assertNotIn("GTX 1070", source)
         for broken_text in ("VÃ", "ecrÃ", "telemÃ", "â†", "â€¦"):
             self.assertNotIn(broken_text, source)
@@ -264,116 +259,6 @@ class SubtitleTests(unittest.TestCase):
         self.assertTrue(is_memory_error(MemoryError()))
         self.assertTrue(is_memory_error(RuntimeError("CUDA out of memory")))
         self.assertFalse(is_memory_error(RuntimeError("arquivo inválido")))
-
-    def test_media_duration_and_progress_are_parsed(self):
-        self.assertEqual(
-            parse_media_duration("Duration: 01:02:03.50, start: 0.000"),
-            3723.5,
-        )
-        self.assertEqual(parse_progress_time("00:01:30.250000"), 90.25)
-        self.assertIsNone(parse_media_duration("Duration: N/A"))
-        self.assertIsNone(parse_progress_time("N/A"))
-
-    def test_tv_output_name_preserves_original(self):
-        video = Path("Filme.mkv")
-        self.assertEqual(
-            tv_video_output_path(video),
-            Path("Filme.legendado-PT-BR.mp4"),
-        )
-
-    def test_tv_command_uses_safe_mp4_and_selected_audio(self):
-        command = build_tv_video_command(
-            Path("ffmpeg.exe"),
-            Path("C:/Vídeos/Filme.mkv"),
-            Path("C:/Vídeos/.saida.part.mp4"),
-            audio_stream_index=3,
-            use_nvenc=True,
-        )
-        joined = " ".join(str(part) for part in command)
-        self.assertIn("h264_nvenc", command)
-        self.assertIn("0:3", command)
-        self.assertIn("subtitles=subtitle.srt", joined)
-        self.assertIn("yuv420p", command)
-        self.assertIn("aac", command)
-        self.assertIn("+faststart", command)
-        self.assertNotIn("libx264", command)
-
-        cpu_command = build_tv_video_command(
-            Path("ffmpeg.exe"),
-            Path("Filme.mkv"),
-            Path("saida.mp4"),
-            audio_stream_index=1,
-            use_nvenc=False,
-        )
-        self.assertIn("libx264", cpu_command)
-        self.assertNotIn("h264_nvenc", cpu_command)
-
-    def test_tv_export_falls_back_from_nvidia_to_cpu(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            video = root / "filme.mkv"
-            subtitle = root / "filme.pt-BR.srt"
-            output = root / "filme.legendado-PT-BR.mp4"
-            video.write_bytes(b"original")
-            subtitle.write_text("legenda", encoding="utf-8")
-
-            def run_attempt(command, *_args, **_kwargs):
-                if "h264_nvenc" in command:
-                    raise RuntimeError("NVENC indisponível")
-                Path(command[-1]).write_bytes(b"novo-video")
-
-            with patch("app.ensure_ffmpeg", return_value=Path("ffmpeg.exe")), patch(
-                "app.ffmpeg_has_feature", return_value=True
-            ), patch("app.probe_media_duration", return_value=60.0), patch(
-                "app.detect_audio_stream",
-                return_value=SimpleNamespace(index=1, language="eng"),
-            ), patch("app.run_tv_video_command", side_effect=run_attempt) as runner:
-                app.create_tv_video(
-                    video,
-                    subtitle,
-                    output,
-                    force_cpu=False,
-                    status=lambda *_: None,
-                    cancel_event=__import__("threading").Event(),
-                )
-
-            self.assertEqual(runner.call_count, 2)
-            self.assertIn("h264_nvenc", runner.call_args_list[0].args[0])
-            self.assertIn("libx264", runner.call_args_list[1].args[0])
-            self.assertEqual(output.read_bytes(), b"novo-video")
-            self.assertEqual(video.read_bytes(), b"original")
-
-    def test_failed_tv_export_preserves_existing_output(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            video = root / "filme.mkv"
-            subtitle = root / "filme.pt-BR.srt"
-            output = root / "filme.legendado-PT-BR.mp4"
-            video.write_bytes(b"original")
-            subtitle.write_text("legenda", encoding="utf-8")
-            output.write_bytes(b"versao-anterior")
-
-            with patch("app.ensure_ffmpeg", return_value=Path("ffmpeg.exe")), patch(
-                "app.ffmpeg_has_feature", return_value=True
-            ), patch("app.probe_media_duration", return_value=60.0), patch(
-                "app.detect_audio_stream",
-                return_value=SimpleNamespace(index=1, language="eng"),
-            ), patch(
-                "app.run_tv_video_command",
-                side_effect=RuntimeError("falha simulada"),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "falha simulada"):
-                    app.create_tv_video(
-                        video,
-                        subtitle,
-                        output,
-                        force_cpu=True,
-                        status=lambda *_: None,
-                        cancel_event=__import__("threading").Event(),
-                    )
-
-            self.assertEqual(output.read_bytes(), b"versao-anterior")
-            self.assertEqual(list(root.glob("*.part.mp4")), [])
 
     def test_whisper_oom_retries_with_economic_model(self):
         fake_torch = SimpleNamespace(
