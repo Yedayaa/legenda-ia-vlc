@@ -1,4 +1,4 @@
-# Relatório técnico — Legenda IA para VLC 1.4.0
+# Relatório técnico — Legenda IA para VLC 1.5.0
 
 ## Escopo
 
@@ -28,7 +28,22 @@
 - Pastas temporárias abandonadas são removidas no próximo uso.
 - SRT salvo de forma atômica: um arquivo anterior só é substituído depois que
   a nova legenda foi gravada por completo.
+- MP4 para TV salvo de forma atômica, sem alterar o vídeo original e sem deixar
+  saída parcial após cancelamento ou falha.
 - Local de saída verificado antes do processamento demorado.
+
+## Vídeo com legenda permanente para TV
+
+- Saída MP4 com vídeo H.264, áudio AAC 192 kbps, `yuv420p` e `faststart` para
+  ampla compatibilidade com TVs, VLC e transmissão pela rede.
+- Renderização da legenda pelo filtro `subtitles`/libass do FFmpeg.
+- Escala garante dimensões pares sem mudar a proporção da imagem.
+- A faixa inglesa detectada para a transcrição é mantida como áudio do MP4.
+- NVIDIA `h264_nvenc` é usada quando disponível; uma falha dispara nova tentativa
+  automática com `libx264` na CPU.
+- O SRT é copiado para um diretório temporário com nome simples antes do filtro,
+  evitando problemas de escape com `C:`, acentos, colchetes e apóstrofos.
+- Progresso é calculado com `-progress pipe:1` e a duração real da mídia.
 
 ## Experiência de uso
 
@@ -43,7 +58,7 @@
 
 ## Validação automatizada
 
-Foram aprovados 20 testes, incluindo:
+Foram aprovados 27 testes, incluindo:
 
 - UTF-8 e ausência de mojibake;
 - formatação SRT e preservação de todas as palavras;
@@ -54,6 +69,10 @@ Foram aprovados 20 testes, incluindo:
 - envio do marcador `>>pob<<` ao tradutor;
 - fallback de memória do Whisper e da tradução;
 - gravação atômica do SRT.
+- criação real de MP4 com legenda queimada, H.264 e AAC;
+- preservação byte a byte do vídeo original;
+- fallback de NVENC para CPU;
+- preservação de uma saída anterior quando a conversão falha.
 
 ## Validação final recomendada
 

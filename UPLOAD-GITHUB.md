@@ -15,7 +15,7 @@ Nome sugerido para o repositório: `legenda-ia-vlc`.
    Se essa opção não aparecer, use **Add file > Upload files**.
 8. Abra a pasta extraída, selecione **todo o conteúdo dentro dela** e arraste
    para o GitHub. Não envie somente o ZIP e não crie uma pasta duplicada.
-9. Em **Commit changes**, escreva `Publica versão 1.4.0` e confirme.
+9. Em **Commit changes**, escreva `Publica versão 1.5.0` e confirme.
 
 Depois do envio, a aba **Actions** executará automaticamente os testes. Um sinal
 verde indica que a sintaxe e os testes unitários passaram.
@@ -26,8 +26,8 @@ O repositório contém o código-fonte. Para oferecer o pacote pronto ao usuári
 
 1. Abra **Releases** no lado direito da página do repositório.
 2. Clique em **Create a new release**.
-3. Crie a tag `v1.4.0`.
-4. Use o título `Legenda IA para VLC 1.4.0`.
+3. Crie a tag `v1.5.0`.
+4. Use o título `Legenda IA para VLC 1.5.0`.
 5. Anexe o arquivo `Legenda-IA-VLC.zip` que já foi testado.
 6. Avise que o usuário precisa instalar Python 3.12 e VLC antes de executar.
 7. Publique a release.
@@ -39,4 +39,3 @@ O repositório contém o código-fonte. Para oferecer o pacote pronto ao usuári
   Windows.
 - O projeto ainda não tem uma licença própria. Escolha uma licença antes de
   autorizar cópia, modificação, redistribuição ou uso comercial por terceiros.
-

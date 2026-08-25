@@ -9,6 +9,8 @@ O que ele faz
 4. Uma segunda IA traduz as falas para português do Brasil.
 5. O programa cria um arquivo .pt-BR.srt ao lado do vídeo.
 6. O vídeo é aberto no VLC com a legenda carregada.
+7. Se você quiser transmitir para uma TV, o programa pode criar outro MP4 com
+   a legenda incorporada permanentemente.
 
 
 COMO INSTALAR NO WINDOWS
@@ -33,6 +35,19 @@ COMO USAR
 5. Aguarde. Na primeira vez, os modelos de IA serão baixados.
 
 
+COMO CRIAR O VÍDEO PARA TV
+--------------------------
+1. Primeiro, gere a legenda e espere o arquivo .pt-BR.srt ficar pronto.
+2. Deixe o mesmo vídeo selecionado.
+3. Clique em "Criar vídeo legendado para TV".
+4. Escolha onde salvar o novo arquivo .mp4.
+5. Aguarde a conversão. O original não será modificado.
+6. Quando abrir no VLC, vá em Reprodução > Renderizador e escolha a TV LG.
+
+A legenda fica permanente na imagem do novo MP4 e aparecerá na TV. Ela não pode
+ser desligada nesse novo arquivo. Para assistir sem legenda, use o vídeo original.
+
+
 QUALIDADE E VELOCIDADE
 ---------------------
 - Recomendado — medium.en: boa precisão e cerca de 5 GB de VRAM.
@@ -46,7 +61,11 @@ QUALIDADE E VELOCIDADE
 - A tradução usa explicitamente a variante brasileira do modelo (PT-BR).
 - A barra mostra a etapa atual e uma porcentagem aproximada do processamento.
 - "Usar somente CPU" existe para emergência, mas fica muito mais lento.
+- A criação do vídeo para TV tenta usar NVIDIA NVENC e muda automaticamente
+  para CPU se a aceleração de vídeo falhar.
 - A legenda só substitui a versão anterior depois de ser gravada por completo.
+- O MP4 para TV também é salvo com segurança: uma falha não apaga o original
+  nem uma conversão anterior completa.
 - Sem GPU compatível o programa funciona, mas um filme pode demorar bastante.
 
 
@@ -71,6 +90,7 @@ ARQUIVOS E PRIVACIDADE
 - A internet é usada inicialmente para baixar os modelos de IA.
 - A legenda fica ao lado do vídeo com o final .pt-BR.srt.
 - Exemplo: Filme.mkv gera Filme.pt-BR.srt.
+- A opção para TV gera Filme.legendado-PT-BR.mp4 e mantém Filme.mkv intacto.
 
 
 OBSERVAÇÃO

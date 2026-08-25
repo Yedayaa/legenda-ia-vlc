@@ -5,7 +5,8 @@ sincronizadas em português do Brasil. Todo o processamento é feito localmente:
 o programa extrai o áudio, transcreve com Whisper, traduz para PT-BR, cria um
 arquivo `.srt` e abre o vídeo no VLC.
 
-> Versão atual: **1.4.0** — testada em um vídeo de aproximadamente 60 minutos
+> Versão atual: **1.5.0** — a geração de legenda foi testada em um vídeo de
+> aproximadamente 60 minutos
 > no Windows com
 > **Intel Core i7-7700K, GTX 1070 8 GB e 16 GB de RAM**.
 
@@ -17,11 +18,14 @@ arquivo `.srt` e abre o vídeo no VLC.
 - Divide o áudio em blocos de 5 minutos, com sobreposição para não cortar falas.
 - Cria `Nome-do-video.pt-BR.srt` na mesma pasta do vídeo.
 - Abre o vídeo no VLC com a legenda carregada.
+- Pode criar um novo MP4 com a legenda incorporada permanentemente para TV.
+- Usa NVIDIA NVENC na conversão quando disponível e tenta CPU se a GPU falhar.
 - Usa CUDA em placas NVIDIA compatíveis e oferece fallback de memória.
 - Exibe etapa, progresso aproximado e mensagens de erro em português.
 
-O aplicativo **não modifica o vídeo e não cria um novo MP4/MKV**. A legenda
-fica em um arquivo `.srt` separado, preservando o vídeo original.
+O vídeo original **nunca é modificado**. A criação do SRT continua separada. A
+opção para TV gera outro arquivo, `Nome-do-video.legendado-PT-BR.mp4`, com a
+legenda visível permanentemente e compatibilidade ampla com TVs e transmissão.
 
 ## Em qual máquina roda?
 
@@ -34,7 +38,8 @@ O suporte oficial desta versão é para **Windows 10 ou 11 de 64 bits**.
 | Alto desempenho | 6 núcleos/12 threads ou melhor | 32 GB | NVIDIA com 8–12 GB de VRAM ou mais | `turbo`, se houver memória disponível |
 
 Também é recomendado ter um SSD e pelo menos **15 GB livres** para o ambiente,
-as dependências, os modelos de IA e os arquivos temporários.
+as dependências e os modelos de IA. Para criar o MP4 de TV, reserve também
+espaço livre semelhante ao tamanho do vídeo original.
 
 ### Avisos importantes sobre hardware
 
@@ -78,16 +83,29 @@ pode demorar e consumir vários gigabytes de internet e armazenamento.
 4. Clique em **Gerar legenda e abrir no VLC**.
 5. Aguarde até a legenda ser salva e o VLC abrir.
 
+### Criar um vídeo para transmitir à TV com a legenda visível
+
+1. Gere o SRT normalmente e espere a conclusão.
+2. Com o mesmo vídeo selecionado, clique em **Criar vídeo legendado para TV**.
+3. Escolha onde salvar o novo arquivo `.mp4`.
+4. Deixe **Usar somente CPU** desmarcado para tentar a aceleração NVIDIA.
+5. Quando o novo vídeo abrir no VLC, use **Reprodução > Renderizador** e escolha
+   a TV LG.
+
+Essa etapa recodifica o vídeo e pode demorar. A legenda fica queimada na imagem,
+por isso aparece na TV mesmo quando a transmissão do VLC não envia SRT externo.
+Ela não poderá ser desligada nesse novo MP4; o arquivo original continua intacto.
+
 Exemplo de saída:
 
 ```text
 Filme.mkv
 Filme.pt-BR.srt
+Filme.legendado-PT-BR.mp4
 ```
 
-Para levar o conteúdo a outro computador ou à TV, mantenha os dois arquivos na
-mesma pasta. Alguns aparelhos reconhecem a legenda automaticamente quando os
-nomes são iguais antes do `.pt-BR.srt`.
+Para reprodução local no computador, basta usar o vídeo original com o SRT. Para
+transmitir com a legenda garantida, use o novo arquivo `.legendado-PT-BR.mp4`.
 
 ## Modos de qualidade
 
@@ -107,6 +125,8 @@ outros programas abertos.
 3. O modelo OPUS-MT traduz as frases para português brasileiro.
 4. O programa ajusta os cortes, limita as linhas e grava o SRT de forma atômica.
 5. O VLC recebe o vídeo original e o SRT pronto.
+6. Quando solicitado, o FFmpeg recodifica uma cópia H.264/AAC e desenha a
+   legenda em cada quadro; tenta NVENC e cai para `libx264` na CPU se necessário.
 
 Se a transcrição estourar a memória da GPU, o programa tenta `small.en`. Se a
 tradução estourar a VRAM, ela é repetida pela CPU. Os modelos são liberados entre
@@ -153,6 +173,13 @@ O programa prioriza a faixa marcada como `eng`/`en`. Arquivos sem idioma nos
 metadados usam a primeira faixa de áudio; nesse caso, ajuste a ordem das faixas
 no arquivo ou use uma versão com metadados corretos.
 
+### O vídeo para TV não foi criado
+
+Execute `instalar.bat` novamente para atualizar o FFmpeg. Feche programas que
+usam a GPU e tente de novo. Se a NVIDIA falhar, o aplicativo já tenta a CPU
+automaticamente; também é possível marcar **Usar somente CPU** antes de iniciar.
+Verifique se há espaço livre para outro arquivo de vídeo completo.
+
 ## Desenvolvimento e testes
 
 O projeto usa apenas a biblioteca padrão durante a descoberta dos testes; os
@@ -186,7 +213,8 @@ THIRD_PARTY_NOTICES.md       Créditos e licenças de terceiros
 - O escopo é fixo: áudio em inglês para legenda em português do Brasil.
 - Tradução automática pode errar nomes, gírias, música e falas sobrepostas.
 - A qualidade depende da clareza e do idioma real da faixa selecionada.
-- O aplicativo gera SRT separado; não incorpora a legenda permanentemente.
+- A legenda incorporada não pode ser desligada no MP4 criado para TV.
+- A conversão para TV recodifica o vídeo e, portanto, demora e usa espaço extra.
 - Instalação e interface foram preparadas para Windows, não para macOS/Linux.
 
 ## Créditos e licença

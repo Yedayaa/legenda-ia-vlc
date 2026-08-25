@@ -87,6 +87,9 @@ echo Verificando a instalacao...
 python -c "import imageio_ffmpeg, sentencepiece, torch, transformers, whisper; print('Componentes: OK'); print('CUDA ativa:', torch.cuda.is_available())"
 if errorlevel 1 goto :failure
 
+python -c "import app; p=app.ensure_ffmpeg(); assert app.ffmpeg_has_feature(p, '-filters', 'subtitles'), 'FFmpeg sem suporte a legendas'; assert app.ffmpeg_has_feature(p, '-encoders', 'libx264'), 'FFmpeg sem H.264'; print('Video para TV: OK')"
+if errorlevel 1 goto :failure
+
 python -m unittest discover -s tests -v
 if errorlevel 1 goto :failure
 

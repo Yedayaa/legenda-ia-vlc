@@ -23,7 +23,7 @@ from tkinter import filedialog, messagebox, ttk
 
 
 APP_NAME = "Legenda IA para VLC"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-tc-big-en-pt"
 TRANSLATION_TARGET_TOKEN = ">>pob<<"
 CHUNK_SECONDS = 300
@@ -378,6 +378,295 @@ def ensure_ffmpeg() -> Path:
 
     os.environ["PATH"] = str(runtime_dir) + os.pathsep + os.environ.get("PATH", "")
     return destination
+
+
+def ffmpeg_has_feature(ffmpeg: Path, listing_option: str, feature: str) -> bool:
+    """Check an FFmpeg capability without depending on localized output."""
+    completed = subprocess.run(
+        [str(ffmpeg), "-hide_banner", listing_option],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        **hidden_subprocess_options(),
+    )
+    output = completed.stdout + "\n" + completed.stderr
+    return re.search(rf"(?<![\w-]){re.escape(feature)}(?![\w-])", output) is not None
+
+
+def parse_media_duration(output: str) -> float | None:
+    match = re.search(
+        r"Duration:\s*(\d+):(\d+):(\d+(?:[.,]\d+)?)",
+        output,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds.replace(",", "."))
+
+
+def probe_media_duration(ffmpeg: Path, video_path: Path) -> float:
+    completed = subprocess.run(
+        [str(ffmpeg), "-nostdin", "-hide_banner", "-i", str(video_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        **hidden_subprocess_options(),
+    )
+    duration = parse_media_duration(completed.stderr)
+    if duration is None or duration <= 0:
+        raise RuntimeError("Não foi possível medir a duração do vídeo.")
+    return duration
+
+
+def parse_progress_time(value: str) -> float | None:
+    match = re.fullmatch(r"(\d+):(\d+):(\d+(?:\.\d+)?)", value.strip())
+    if match is None:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def tv_video_output_path(video_path: Path) -> Path:
+    return video_path.with_name(f"{video_path.stem}.legendado-PT-BR.mp4")
+
+
+def build_tv_video_command(
+    ffmpeg: Path,
+    video_path: Path,
+    temporary_output: Path,
+    audio_stream_index: int,
+    use_nvenc: bool,
+) -> list[str]:
+    # The worker runs inside a temporary folder containing only "subtitle.srt".
+    # This avoids FFmpeg filter escaping bugs with Windows drive letters and accents.
+    subtitle_filter = (
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+        "subtitles=subtitle.srt:charenc=UTF-8:"
+        "force_style='FontName=Arial,FontSize=22,Outline=2,Shadow=1,MarginV=26'"
+    )
+    if use_nvenc:
+        video_codec = [
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p5",
+            "-rc",
+            "vbr",
+            "-cq",
+            "20",
+            "-b:v",
+            "0",
+        ]
+    else:
+        video_codec = [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "20",
+        ]
+    return [
+        str(ffmpeg),
+        "-nostdin",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-stats_period",
+        "0.5",
+        "-i",
+        str(video_path),
+        "-map",
+        "0:V:0",
+        "-map",
+        f"0:{audio_stream_index}",
+        "-vf",
+        subtitle_filter,
+        *video_codec,
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-map_metadata",
+        "0",
+        "-map_chapters",
+        "0",
+        "-movflags",
+        "+faststart",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        str(temporary_output),
+    ]
+
+
+def run_tv_video_command(
+    command: Sequence[str],
+    working_directory: Path,
+    duration: float,
+    processor_name: str,
+    status: Callable[[str, float], None],
+    cancel_event: threading.Event,
+) -> None:
+    process = subprocess.Popen(
+        list(command),
+        cwd=working_directory,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        **hidden_subprocess_options(),
+    )
+    output_tail: list[str] = []
+    last_progress = -1
+    assert process.stdout is not None
+    try:
+        for raw_line in process.stdout:
+            if cancel_event.is_set():
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise CancelledError("Processamento cancelado.")
+
+            line = raw_line.strip()
+            if line.startswith("out_time="):
+                elapsed = parse_progress_time(line.partition("=")[2])
+                if elapsed is not None:
+                    progress = min(98, max(0, round(elapsed / duration * 98)))
+                    if progress != last_progress:
+                        status(
+                            f"Criando vídeo legendado na {processor_name}…",
+                            float(progress),
+                        )
+                        last_progress = progress
+            elif line and not re.match(
+                r"^(frame|fps|stream_\d+_\d+_q|bitrate|total_size|"
+                r"out_time_(?:us|ms)|dup_frames|drop_frames|speed|progress)=",
+                line,
+            ):
+                output_tail.append(line)
+                output_tail = output_tail[-40:]
+        return_code = process.wait()
+    finally:
+        process.stdout.close()
+
+    if cancel_event.is_set():
+        raise CancelledError("Processamento cancelado.")
+    if return_code != 0:
+        detail = "\n".join(output_tail).strip()
+        raise RuntimeError(detail or "O FFmpeg não conseguiu criar o vídeo.")
+
+
+def create_tv_video(
+    video_path: Path,
+    subtitle_path: Path,
+    output_path: Path,
+    force_cpu: bool,
+    status: Callable[[str, float], None],
+    cancel_event: threading.Event,
+) -> None:
+    if not video_path.is_file():
+        raise RuntimeError("O vídeo selecionado não foi encontrado.")
+    if not subtitle_path.is_file():
+        raise RuntimeError("A legenda PT-BR ainda não foi criada.")
+    try:
+        if video_path.resolve() == output_path.resolve():
+            raise RuntimeError("Escolha outro nome para preservar o vídeo original.")
+    except OSError:
+        pass
+
+    verify_output_location(output_path)
+    status("Verificando o conversor de vídeo…", 0.0)
+    ffmpeg = ensure_ffmpeg()
+    if not ffmpeg_has_feature(ffmpeg, "-filters", "subtitles"):
+        raise RuntimeError(
+            "O FFmpeg instalado não possui suporte para incorporar legendas. "
+            "Execute instalar.bat novamente para atualizar os componentes."
+        )
+    if not ffmpeg_has_feature(ffmpeg, "-encoders", "libx264"):
+        raise RuntimeError(
+            "O FFmpeg instalado não possui o codificador H.264 necessário. "
+            "Execute instalar.bat novamente."
+        )
+
+    duration = probe_media_duration(ffmpeg, video_path)
+    audio_stream = detect_audio_stream(ffmpeg, video_path)
+    nvenc_available = (
+        not force_cpu
+        and ffmpeg_has_feature(ffmpeg, "-encoders", "h264_nvenc")
+    )
+
+    temporary_output: Path | None = None
+    with tempfile.TemporaryDirectory(prefix=TEMP_PREFIX) as temp_dir:
+        working_directory = Path(temp_dir)
+        shutil.copy2(subtitle_path, working_directory / "subtitle.srt")
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=output_path.parent,
+                prefix=f".{output_path.stem}.",
+                suffix=".part.mp4",
+                delete=False,
+            ) as temporary:
+                temporary_output = Path(temporary.name)
+
+            attempts = [True, False] if nvenc_available else [False]
+            for attempt_index, use_nvenc in enumerate(attempts):
+                processor_name = "GPU (NVIDIA)" if use_nvenc else "CPU"
+                status(f"Criando vídeo legendado na {processor_name}…", 1.0)
+                command = build_tv_video_command(
+                    ffmpeg,
+                    video_path,
+                    temporary_output,
+                    audio_stream.index,
+                    use_nvenc,
+                )
+                try:
+                    run_tv_video_command(
+                        command,
+                        working_directory,
+                        duration,
+                        processor_name,
+                        status,
+                        cancel_event,
+                    )
+                    break
+                except RuntimeError as exc:
+                    if not use_nvenc or attempt_index == len(attempts) - 1:
+                        raise RuntimeError(
+                            "Não foi possível criar o vídeo legendado. "
+                            f"Detalhes do FFmpeg: {exc}"
+                        ) from exc
+                    temporary_output.unlink(missing_ok=True)
+                    temporary_output.touch()
+                    status(
+                        "A aceleração NVIDIA falhou. Tentando pela CPU…",
+                        1.0,
+                    )
+
+            if cancel_event.is_set():
+                raise CancelledError("Processamento cancelado.")
+            if temporary_output.stat().st_size <= 0:
+                raise RuntimeError("O vídeo convertido ficou vazio.")
+            status("Finalizando o novo arquivo de vídeo…", 99.0)
+            os.replace(temporary_output, output_path)
+            temporary_output = None
+        finally:
+            if temporary_output is not None:
+                temporary_output.unlink(missing_ok=True)
+    status("Vídeo legendado para TV concluído.", 100.0)
 
 
 def wav_duration_seconds(path: Path) -> float:
@@ -939,8 +1228,8 @@ class LegendaApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"{APP_NAME} {APP_VERSION}")
-        self.root.geometry("780x620")
-        self.root.minsize(680, 560)
+        self.root.geometry("900x660")
+        self.root.minsize(780, 610)
         self.root.configure(bg="#0B1220")
 
         self.video_path = tk.StringVar()
@@ -992,6 +1281,14 @@ class LegendaApp:
             foreground="#FFFFFF",
         )
         style.map("Accent.TButton", background=[("active", "#3B82F6")])
+        style.configure(
+            "TV.TButton",
+            font=("Segoe UI Semibold", 11),
+            padding=(18, 11),
+            background="#0F766E",
+            foreground="#FFFFFF",
+        )
+        style.map("TV.TButton", background=[("active", "#0D9488")])
         style.configure("TButton", font=("Segoe UI", 10), padding=(12, 8))
         style.configure("TCombobox", padding=7)
         style.configure(
@@ -1055,10 +1352,26 @@ class LegendaApp:
             command=self.start,
         )
         self.start_button.pack(side="left")
+        self.tv_button = ttk.Button(
+            button_row,
+            text="Criar vídeo legendado para TV",
+            style="TV.TButton",
+            command=self.start_tv_export,
+        )
+        self.tv_button.pack(side="left", padx=(10, 0))
         self.cancel_button = ttk.Button(
             button_row, text="Cancelar", command=self.cancel, state="disabled"
         )
         self.cancel_button.pack(side="left", padx=(10, 0))
+
+        ttk.Label(
+            card,
+            text=(
+                "A opção para TV usa o SRT já criado, preserva o original e gera "
+                "um novo MP4 com legenda permanente."
+            ),
+            style="Card.TLabel",
+        ).pack(anchor="w", pady=(12, 0))
 
         status_card = ttk.Frame(shell, style="Card.TFrame", padding=18)
         status_card.pack(fill="both", expand=True, pady=(16, 0))
@@ -1101,7 +1414,13 @@ class LegendaApp:
             else:
                 self.status_text.set(f"{message} ({progress_value:.0f}%)")
                 self.progress["value"] = progress_value
-            if not message.startswith(("Transcrevendo inglês", "Traduzindo para PT-BR")):
+            if not message.startswith(
+                (
+                    "Transcrevendo inglês",
+                    "Traduzindo para PT-BR",
+                    "Criando vídeo legendado",
+                )
+            ):
                 self._append_log(message)
 
         self.root.after(0, apply)
@@ -1142,6 +1461,51 @@ class LegendaApp:
         )
         self.worker.start()
 
+    def start_tv_export(self) -> None:
+        video = Path(self.video_path.get().strip().strip('"'))
+        if not video.is_file():
+            messagebox.showwarning(APP_NAME, "Selecione um arquivo de vídeo válido.")
+            return
+
+        subtitle = video.with_name(f"{video.stem}.pt-BR.srt")
+        if not subtitle.is_file():
+            messagebox.showinfo(
+                APP_NAME,
+                "Gere a legenda primeiro. Depois clique novamente em "
+                "'Criar vídeo legendado para TV'.",
+            )
+            return
+
+        suggested = tv_video_output_path(video)
+        selected = filedialog.asksaveasfilename(
+            title="Salvar novo vídeo com legenda permanente",
+            initialdir=str(video.parent),
+            initialfile=suggested.name,
+            defaultextension=".mp4",
+            filetypes=(("Vídeo MP4", "*.mp4"),),
+        )
+        if not selected:
+            return
+        output = Path(selected)
+        if output.suffix.lower() != ".mp4":
+            output = output.with_suffix(".mp4")
+        if output.exists() and not messagebox.askyesno(
+            APP_NAME,
+            f"O arquivo {output.name} já existe. Deseja substituí-lo?",
+        ):
+            return
+
+        self.cancel_event.clear()
+        self._set_running(True)
+        self.progress["value"] = 0
+        self.update_status("Preparando o novo vídeo para TV…", 0.0)
+        self.worker = threading.Thread(
+            target=self._run_tv_worker,
+            args=(video, subtitle, output, self.force_cpu.get()),
+            daemon=True,
+        )
+        self.worker.start()
+
     def cancel(self) -> None:
         self.cancel_event.set()
         self.update_status("Cancelamento solicitado. Aguarde o fim da etapa atual…")
@@ -1160,7 +1524,9 @@ class LegendaApp:
     def _set_running(self, running: bool) -> None:
         state = "disabled" if running else "normal"
         self.start_button.configure(state=state)
+        self.tv_button.configure(state=state)
         self.select_button.configure(state=state)
+        self.file_entry.configure(state=state)
         self.quality_box.configure(state="disabled" if running else "readonly")
         self.cpu_check.configure(state=state)
         self.cancel_button.configure(state="normal" if running else "disabled")
@@ -1189,6 +1555,30 @@ class LegendaApp:
         else:
             self.root.after(0, lambda: self._finish_success(video, output))
 
+    def _run_tv_worker(
+        self,
+        video: Path,
+        subtitle: Path,
+        output: Path,
+        force_cpu: bool,
+    ) -> None:
+        try:
+            create_tv_video(
+                video,
+                subtitle,
+                output,
+                force_cpu,
+                self.update_status,
+                self.cancel_event,
+            )
+        except CancelledError:
+            self.root.after(0, self._finish_cancelled)
+        except Exception as exc:  # GUI boundary: preserve the original and report.
+            traceback.print_exc(file=sys.stderr)
+            self.root.after(0, lambda error=exc: self._finish_tv_error(error))
+        else:
+            self.root.after(0, lambda: self._finish_tv_success(output))
+
     def _finish_cancelled(self) -> None:
         self._set_running(False)
         self.status_text.set("Processamento cancelado.")
@@ -1202,21 +1592,37 @@ class LegendaApp:
         self._append_log(f"ERRO: {error}")
         messagebox.showerror(APP_NAME, str(error))
 
+    def _finish_tv_error(self, error: Exception) -> None:
+        self._set_running(False)
+        self.status_text.set("Não foi possível criar o vídeo legendado.")
+        self.progress["value"] = 0
+        self._append_log(f"ERRO AO CRIAR VÍDEO: {error}")
+        messagebox.showerror(
+            APP_NAME,
+            f"{error}\n\nO vídeo original não foi alterado.",
+        )
+
+    def _find_or_choose_vlc(self) -> Path | None:
+        vlc = find_vlc()
+        if vlc is not None:
+            return vlc
+        selected = filedialog.askopenfilename(
+            title="Localize o vlc.exe",
+            filetypes=(("VLC", "vlc.exe"), ("Executáveis", "*.exe")),
+        )
+        vlc = Path(selected) if selected else None
+        if vlc and vlc.is_file():
+            remember_vlc(vlc)
+            return vlc
+        return None
+
     def _finish_success(self, video: Path, subtitle: Path) -> None:
         self._set_running(False)
         self.status_text.set("Legenda PT-BR criada com sucesso.")
         self.progress["value"] = 100
         self._append_log(f"Legenda salva em: {subtitle}")
 
-        vlc = find_vlc()
-        if vlc is None:
-            selected = filedialog.askopenfilename(
-                title="Localize o vlc.exe",
-                filetypes=(("VLC", "vlc.exe"), ("Executáveis", "*.exe")),
-            )
-            vlc = Path(selected) if selected else None
-            if vlc and vlc.is_file():
-                remember_vlc(vlc)
+        vlc = self._find_or_choose_vlc()
 
         if vlc and vlc.is_file():
             try:
@@ -1236,6 +1642,36 @@ class LegendaApp:
             messagebox.showinfo(
                 APP_NAME,
                 f"Legenda criada:\n{subtitle}\n\nAbra o vídeo no VLC e carregue esse arquivo.",
+            )
+
+    def _finish_tv_success(self, output: Path) -> None:
+        self._set_running(False)
+        self.status_text.set("Vídeo com legenda permanente criado com sucesso.")
+        self.progress["value"] = 100
+        self._append_log(f"Vídeo para TV salvo em: {output}")
+
+        vlc = self._find_or_choose_vlc()
+        if vlc and vlc.is_file():
+            try:
+                subprocess.Popen([str(vlc), str(output)])
+            except OSError as exc:
+                messagebox.showwarning(
+                    APP_NAME,
+                    f"O vídeo foi criado, mas o VLC não abriu:\n{exc}\n\n"
+                    f"Abra manualmente:\n{output}",
+                )
+                return
+            messagebox.showinfo(
+                APP_NAME,
+                "Vídeo legendado criado e aberto no VLC.\n\n"
+                "Agora use Reprodução > Renderizador para enviar à TV.\n"
+                "O vídeo original foi preservado.",
+            )
+        else:
+            messagebox.showinfo(
+                APP_NAME,
+                f"Vídeo legendado criado:\n{output}\n\n"
+                "O vídeo original foi preservado.",
             )
 
 
